@@ -1,0 +1,136 @@
+---
+title: "Problem Set 5"
+author: "Will Drake"
+date: "2/17/2022"
+output:
+  html_document: default
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE)
+
+library(Lahman)
+library(tidyverse)
+library(knitr)
+```
+
+
+**Will Drake:**
+
+**Instructions:** Type your answers to the questions below in the R Markdown file (.Rmd) provided. Knit the .Rmd file to a word or html document and submit a hard copy at the start of class on the lesson it is due.  If you will be missing class you can submit on Blackboard prior to the start of the lesson it is due (Note: if you are submitting on blackboard you must knit to word). This is an individual assignment; you must document any assistance in accordance with *Documentation of Academic Work*. Please submit a cover sheet and documentation with your knitted document.
+
+**Due:** Lesson 14
+
+1. In the Lesson 11 Review, we calculated the expected run value for sacrifice bunting with a runner on first with no outs and compared it to the expected run value for hitting away (not sacrificing bunting).  In the Review, the frequency distribution of states and run values ("010 1": 0.75, "100 1": 0.10; "110 0": 0.10; "011 0": 0.05) we used were approximations.  Using the retrosheet data for 2011, calculate the actual frequency distributions of run values for plate appearances with a runner on first and no outs when (1) the team bunted and (2) the team did not bunt.  Report your results in a table and summarize the results in a paragraph. (*hint: your table should have four columns: new state, run value, percent when bunting, percent when not bunting*)  In addition, calculate and compare the expected run values for the two strategies: bunting and not bunting (*hint: for each strategy, multiply the frequencies by the run values and sum the results*).  The first code chunk below creates the run expectancy matrix and adds additional column to the data set.  
+
+```{r, cache = TRUE}
+site = "https://raw.githubusercontent.com/maxtoki/baseball_R/"
+fields <- read_csv(file = paste(site, "master/data/fields.csv", sep =""))
+all2011 <- read_csv(file = paste(site, "master/data/all2011.csv", sep = ""),
+                    col_names = pull(fields, Header),
+                    na = character())
+
+#create some new variables
+all2011 %>% 
+  mutate(RUNS = AWAY_SCORE_CT + HOME_SCORE_CT,
+         HALF.INNING = paste(GAME_ID, INN_CT, BAT_HOME_ID),
+         RUNS.SCORED = 
+           (BAT_DEST_ID > 3) + (RUN1_DEST_ID > 3) + 
+           (RUN2_DEST_ID > 3) + (RUN3_DEST_ID > 3)) ->
+  all2011
+
+#compute maximum total score for each half inning
+all2011 %>%
+  group_by(HALF.INNING) %>%
+  summarize(Outs.Inning = sum(EVENT_OUTS_CT),
+            Runs.Inning = sum(RUNS.SCORED),
+            Runs.Start = first(RUNS),
+            MAX.RUNS = Runs.Inning + Runs.Start) -> 
+  half_innings
+
+#compute runs scored in remainder of the inning (ROI)
+all2011 %>%
+  inner_join(half_innings, by = "HALF.INNING") %>%
+  mutate(RUNS.ROI = MAX.RUNS - RUNS) ->
+  all2011
+
+#create a new variable for the current state
+all2011 %>%
+  mutate(BASES = 
+           paste(ifelse(BASE1_RUN_ID > '',1,0),
+                 ifelse(BASE2_RUN_ID > '',1,0),
+                 ifelse(BASE3_RUN_ID > '',1,0), sep = ""),
+         STATE = paste(BASES, OUTS_CT)) ->
+  all2011
+
+#NRUNNER1 - indicator if 1st base is occupied after the play
+all2011 %>%
+  mutate(NRUNNER1 =
+           as.numeric(RUN1_DEST_ID==1 | BAT_DEST_ID == 1),
+         NRUNNER2 = 
+           as.numeric(RUN1_DEST_ID == 2 | RUN2_DEST_ID == 2 |
+                        BAT_DEST_ID == 2),
+         NRUNNER3 = 
+           as.numeric(RUN1_DEST_ID == 3 | RUN2_DEST_ID == 3 |
+                        RUN3_DEST_ID == 3 | BAT_DEST_ID == 3),
+         NOUTS = OUTS_CT + EVENT_OUTS_CT,
+         NEW.BASES = paste(NRUNNER1,NRUNNER2, NRUNNER3, sep = ""),
+         NEW.STATE = paste(NEW.BASES, NOUTS)) ->
+  all2011
+
+#only consider plays where the runners on base, outs, or runs scored changed
+all2011 %>%
+  filter((STATE != NEW.STATE) | (RUNS.SCORED > 0)) ->
+  all2011
+
+#use only complete half-innings
+all2011 %>%
+  filter(Outs.Inning == 3) -> all2011Complete
+
+#calculate expected number of runs scored for remainder of inning
+#for each bases/outs situation
+all2011Complete %>%
+  group_by(STATE) %>%
+  summarize(Mean = mean(RUNS.ROI)) %>%
+  mutate(Outs = substr(STATE,5,5)) %>%
+  arrange(Outs) -> RUNS
+
+RUNS_out = matrix(round(RUNS$Mean,2), 8,3)
+colnames(RUNS_out) = c("0 outs", "1 out", "2 outs")
+rownames(RUNS_out) = c("000","001","010","011",
+                       "100","101","110", "111")
+
+#calculate the run value of each play (p166)
+all2011 <- all2011 %>% 
+  left_join(select(RUNS, -Outs), by = "STATE") %>% 
+  rename(Runs.State = Mean) %>% 
+  left_join(select(RUNS, -Outs),
+            by = c("NEW.STATE" = "STATE")) %>% 
+  rename(Runs.New.State = Mean) %>% 
+  replace_na(list(Runs.New.State = 0)) %>% 
+  mutate(run_value = Runs.New.State - Runs.State + RUNS.SCORED)
+```
+
+
+```{r}
+
+```
+
+
+
+2. In the first question, the difference in expected run values is an estimate of the effect of bunting.  However, our effect estimate is likely a biased estimate because the hitters who did not bunt are fundamentally different from those who did bunt in that situation. This type of bias is called confounding and is a concern in nearly every observational study (studies in which researchers have not randomized the treatment variable).  When researchers identify and measure confounding variables, statistical methods exist to control for them and obtain unbiased estimates of effects.
+
+Assess whether hitters who bunted were generally different than those who did not.  For example, you could calculate each hitter's batting average ($AVG = H/AB$) using the Lahman Batting data frame and attach it to the all2011 data frame (note the BAT_ID in all2011 is the same as retroID in the People data frame).  Then, plot the distributions (boxplots or histograms) of batting averages for bunters and nonbunters next to each other.
+
+```{r}
+
+```
+
+3.  Thus far, we have been working with the run expectancy matrix.  The run probability matrix gives the probability of scoring at least one run in the remainder of the inning for each state.  Using the retrosheet data, calculate the run probability matrix for 2011 and display in a table. (*hint: you only have to change one line of code in the run expectancy matrix.*)
+
+```{r}
+
+```
